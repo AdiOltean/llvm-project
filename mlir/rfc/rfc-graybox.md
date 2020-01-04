@@ -1,6 +1,7 @@
 # RFC - affine.graybox op
 
-This proposal is on adding a new op named *affine.graybox* to MLIR's [affine dialect](https://github.com/tensorflow/mlir/blob/master/g3doc/Dialects/Affine.md).
+This proposal is on adding a new op named *affine.graybox* to MLIR's [affine
+dialect](https://github.com/llvm/llvm-project/blob/master/mlir/docs/Dialects/Affine.md).
 The op allows the polyhedral form to be used without the need for outlining to
 functions, and without the need to turn affine ops such as affine.for, affine.if
 into standard unrestricted for's and if's respectively. In particular, with an
@@ -16,27 +17,28 @@ the previous design with significant implications.
 
 ## Op Description
 
-1. The *affine.graybox* op has zero or more results, zero or more operands, and
-   holds a single region, which is a list of zero or more blocks. The op's
-   region can have zero or more arguments, each of which can only be a
-   *memref*. The operands bind 1:1 to its region's arguments.  The op can't use
-   any memrefs defined outside of it, but can use any other SSA values that
-   dominate it. Its region's blocks can have terminators the same way as
-   current MLIR functions (FuncOp) can. Control from any *return* ops in its
-   region returns to right after the *affine.graybox* op. The results of the
-   op match 1:1 with the return values from the region's blocks.
+1. The *affine graybox* op introduces a new symbol context for affine
+   operations.  It holds a single region,  which can be a list of one or more
+   blocks. The op's region can have zero or more arguments, each of which can
+   only be a *memref*.  The operands bind 1:1 to its region's arguments.  The op
+   can't use any memrefs defined outside of it, but can use any other SSA values
+   that dominate it. Its region's blocks can have terminators the same way as
+   current MLIR functions (FuncOp) can.  Control from any *return* ops from the
+   top level of its region returns to right after the *affine.graybox* op.  Its
+   control flow thus conforms to the control flow semantics of regions, i.e.,
+   control always returns to the immediate enclosing (parent) op. The results of
+   a graybox op match 1:1 with the return values from its region's blocks.
 
 2. The requirement for an SSA value to be a valid symbol
-   ([mlir::isValidSymbol](https://github.com/tensorflow/mlir/blob/3671cf5558a273a865007405503793746e4ddbb7/lib/Dialect/AffineOps/AffineOps.cpp#L128))
+   ([mlir::isValidSymbol](https://github.com/llvm/llvm-project/blob/3671cf5558a273a865007405503793746e4ddbb7/lib/Dialect/AffineOps/AffineOps.cpp#L128))
    changes so that it also includes (a) symbols at the top-level of any
    *affine.graybox*, and (b) those values that dominate an *affine.graybox*. In
    the latter case, symbol validity is sensitive to the enclosing graybox. As
    such, there has to be an additional method: mlir::isValidSymbol(Value \*v,
-   Operation \*op) to check for symbol validity for use in the specific op. See
-   design alternatives towards the end.
+   Operation \*op) to check for symbol validity for use in the specific op.
 
 3. The op is not [isolated from
-   above](https://github.com/tensorflow/mlir/blob/be6746fc3b9e6bd0527cc961256e362f44130cd4/include/mlir/IR/OperationSupport.h#L76)
+   above](https://github.com/llvm/llvm-project/blob/be6746fc3b9e6bd0527cc961256e362f44130cd4/include/mlir/IR/OperationSupport.h#L76)
    for typical SSA purposes, but effectively isolated for polyhedral purposes
      and affine passes (see further below on ''affine walks'', which do not walk
      into affine grayboxes when walking from above).  All SSA values (other than
@@ -49,9 +51,9 @@ the previous design with significant implications.
 4. The op is eventually discarded by -lower-affine, with
    its region being inlined. The inlined IR will not violate any symbol
    restrictions since all affine ops will have been lowered to
-   [standard](https://github.com/tensorflow/mlir/blob/master/g3doc/Dialects/Standard.md)
+   [standard](https://github.com/llvm/llvm-project/blob/master/mlir/docs/Dialects/Standard.md)
    ones. The existing
-   [Inliner](https://github.com/tensorflow/mlir/blob/5b7d9bb465c0e86b2c8e506889daf5ae2619736d/include/mlir/Transforms/InliningUtils.h#L189)
+   [Inliner](https://github.com/llvm/llvm-project/blob/5b7d9bb465c0e86b2c8e506889daf5ae2619736d/include/mlir/Transforms/InliningUtils.h#L189)
    could be extended to inline *affine.graybox* and used from the
    LowerAffinePass as its final step.
 
@@ -67,19 +69,18 @@ the previous design with significant implications.
 
 ## Terminology
 
-An *affine region* is the set of all ops that have the same closest enclosing
+An *affine scope* is the set of all ops that have the same closest enclosing
 *affine.graybox* op or the same enclosing function op (if one or both of them
 have no enclosing *affine.graybox*).
 
-Every MLIR op is always part of a unique *affine region*.
+Every MLIR op is always part of a unique *affine scope*.
 
 ## Goals
 
 An *affine.graybox* op's goal is to start a new polyhedral symbol context for
-its [*affine region*](#Terminology). IR that would have otherwise been
-considered non-affine and failed verification will be affine with grayboxes
-inserted at the right places. In addition, the design choices made herein ensure
-that:
+its [*affine scope*](#Terminology). IR that would have otherwise been considered
+non-affine and failed verification will be affine with grayboxes inserted at the
+right places. In addition, the design choices made herein ensure that:
 
 * nearly all existing pattern rewrites work across graybox op boundaries,
 * all existing affine passes work correctly as is in the graybox ops while
@@ -100,7 +101,7 @@ are the current ways of representing them.
 This example was used in the Rationale document to show how
 outlining to a separate function allowed representation using existing
 affine constructs:
-https://github.com/tensorflow/mlir/blob/master/g3doc/Rationale.md#Examples
+https://github.com/llvm/llvm-project/blob/master/mlir/docs/Rationale.md#Examples
 
 ```
 // A simple linear search in every row of a matrix.
@@ -231,7 +232,7 @@ for (i = 0; i < N; ++i) {
 * **Walkers: GrayBoxes are isolated from above for polyhedral passes**
 
    There has to be a new walkAffine method that behaves like
-   [walk](https://github.com/tensorflow/mlir/blob/e4e6ec350536905f0eeb85c658f87da848ed7658/include/mlir/IR/Operation.h#L511)
+   [walk](https://github.com/llvm/llvm-project/blob/e4e6ec350536905f0eeb85c658f87da848ed7658/include/mlir/IR/Operation.h#L511)
    except that it does not walk regions of an affine.graybox.  Most polyhedral/affine passes will use this and thus see
    *affine.graybox* as opaque *for any walks from above*.
 
@@ -242,12 +243,12 @@ for (i = 0; i < N; ++i) {
    grayboxes in a function are otherwise disjoint and can otherwise be
    processed in parallel. In summary, there can be an AffineFunctionPass that,
    instead of providing
-   [runOnFunction](https://github.com/tensorflow/mlir/blob/8aadfe58a5deea85656a8d8318e6b40d9de350c4/include/mlir/Pass/Pass.h#L267)
+   [runOnFunction](https://github.com/llvm/llvm-project/blob/8aadfe58a5deea85656a8d8318e6b40d9de350c4/include/mlir/Pass/Pass.h#L267)
    needs to only implement an runOnOperation(op) where op is either a FuncOp or
    an AffineGrayBoxOp.
 
    Some of the current polyhedral passes/utilities can continue using walk (for
-   eg. [normalizeMemRefs](https://github.com/tensorflow/mlir/blob/331c663bd2735699267abcc850897aeaea8433eb/include/mlir/Transforms/Utils.h#L89), while many will just have to be changed to use walkAffine.
+   eg. [normalizeMemRefs](https://github.com/llvm/llvm-project/blob/331c663bd2735699267abcc850897aeaea8433eb/include/mlir/Transforms/Utils.h#L89), while many will just have to be changed to use walkAffine.
 
 * **Simplification / Canonicalization**
 
@@ -258,7 +259,7 @@ for (i = 0; i < N; ++i) {
    with the corresponding region arguments not having any uses inside the gray
    box. Canonicalization patterns would be needed to drop duplicate region
    arguments and unused region arguments.
-   [MemRefCastFold](https://github.com/tensorflow/mlir/blob/ef77ad99a621985aeca1df94168efc9489de95b6/lib/Dialect/StandardOps/Ops.cpp#L228)
+   [MemRefCastFold](https://github.com/llvm/llvm-project/blob/ef77ad99a621985aeca1df94168efc9489de95b6/lib/Dialect/StandardOps/Ops.cpp#L228)
    is another canonicalization pattern that the *affine.graybox* has to
    implement, and this is easily/cleanly done (by replacing the argument and its
    uses with a memref of a different type). Overall, having memrefs as explicit
@@ -271,10 +272,10 @@ for (i = 0; i < N; ++i) {
 *  **Memref replacement across gray boxes**
    There are situations/utilities where one can consistently perform
    rewriting/transformation/analysis cutting across grayboxes. One example is
-   [normalizeMemRefs](https://github.com/tensorflow/mlir/blob/331c663bd2735699267abcc850897aeaea8433eb/include/mlir/Transforms/Utils.h#L89),
+   [normalizeMemRefs](https://github.com/llvm/llvm-project/blob/331c663bd2735699267abcc850897aeaea8433eb/include/mlir/Transforms/Utils.h#L89),
    which turns all non-identity layout maps in memrefs into identity
    ones. Having memrefs explicitly captured is a slight hindrance here, but
-   [mlir::replaceAllMemrefUsesWith](https://github.com/tensorflow/mlir/blob/331c663bd2735699267abcc850897aeaea8433eb/include/mlir/Transforms/Utils.h#L69)
+   [mlir::replaceAllMemrefUsesWith](https://github.com/llvm/llvm-project/blob/331c663bd2735699267abcc850897aeaea8433eb/include/mlir/Transforms/Utils.h#L69)
    can be extended to transparently perform the
    replacement inside any affine grayboxes encountered if the caller says so.
    In other cases like scalar replacement, memref packing / explicit copying,
@@ -365,7 +366,7 @@ transformation, the graybox is treated opaquely; the inside of the graybox
 itself is all locally affine. There is no way to analyze or represent
 dependences precisely between the store on %Y outside the graybox and the
 load/store on it inside the graybox. Depedence analysis relies on symbolic
-context which is unique to a specific [*affine region*](#Terminology).
+context which is unique to a specific [*affine scope*](#Terminology).
 
 Note that all scalars within their dominance scope are used freely in the
 graybox region. As an example, any pass that computes memref regions for the
@@ -401,19 +402,18 @@ replaceAllMemRefUsesWith() will all just work transparently and do the work: the
 non-dereferencing uses of that memref on an affine.graybox op just makes things
 like double buffering, data copy generation, etc. all bail out on those (just
 because it isn't polyhedrally analyzeable unless the graybox can be eliminated
-and you get a larger encompassing [*affine region*](#Terminology)) -- the same
-way they currently
-bail out on any call ops taking memrefs as arguments or return ops returning
-memrefs.  The same is true for memref dependence analysis: there isn't a way to
-represent dependences between an affine access and another one that is inside
-another graybox dominated by it - for all these purposes, the latter access is
-like one happening on a memref that has escaped at the graybox op boundary. With
-explicit capture of memref's, an affine graybox gets treated as any other op
-(for eg. like a 'call' op that takes memref as an operand), and so for an affine
-pass, you don't even have to know that the affine.graybox exists, and one won't
-even have to modify any of these passes. *walkAffine* will simply not walk their
-regions, and "operand uses" consistently have all that the affine pass needs for
-*every* op.
+and you get a larger encompassing [*affine scope*](#Terminology)) -- the same
+way they currently bail out on any call ops taking memrefs as arguments or
+return ops returning memrefs.  The same is true for memref dependence analysis:
+there isn't a way to represent dependences between an affine access and another
+one that is inside another graybox dominated by it - for all these purposes, the
+latter access is like one happening on a memref that has escaped at the graybox
+op boundary. With explicit capture of memref's, an affine graybox gets treated
+as any other op (for eg. like a 'call' op that takes memref as an operand), and
+so for an affine pass, you don't even have to know that the affine.graybox
+exists, and one won't even have to modify any of these passes. *walkAffine* will
+simply not walk their regions, and "operand uses" consistently have all that the
+affine pass needs for *every* op.
 
 The isolation of a graybox's region for polyhedral passes running from above is
 necessary (this is why it's not a white box), and to do so cleanly, explicitly
@@ -436,7 +436,7 @@ to anyway exist and is reusable/necessary for any op holding one or regions. The
 third one is non-trivial and is a good example to explain the burden explicit
 capture entails.
 
-* [**MemRefCastFolder**](https://github.com/tensorflow/mlir/blob/ef77ad99a621985aeca1df94168efc9489de95b6/lib/Dialect/StandardOps/Ops.cpp#L228):
+* [**MemRefCastFolder**](https://github.com/llvm/llvm-project/blob/ef77ad99a621985aeca1df94168efc9489de95b6/lib/Dialect/StandardOps/Ops.cpp#L228):
   this pattern already exists and can merely be
   registered on the affine.graybox op.
 
